@@ -1,0 +1,77 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    env:
+      IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Get fonts (optional, may be skipped)
+        continue-on-error: true
+        run: git clone --depth 1 https://github.com/storytold/craft-fonts ../craft-fonts
+
+      - name: Install Rust for iPad and iPhone
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Speed up repeat builds
+        uses: Swatinem/rust-cache@v2
+
+      - name: Show project layout (useful for fixing errors)
+        run: |
+          ls
+          ls apps
+          cat apps/deckcraft/Cargo.toml
+
+      - name: Build for iPad
+        run: cargo build --release --target aarch64-apple-ios -p deckcraft
+
+      - name: List build output
+        run: ls -la target/aarch64-apple-ios/release/
+
+      - name: Package into an IPA
+        run: |
+          mkdir -p Payload/DeckCraft.app
+          cp target/aarch64-apple-ios/release/deckcraft Payload/DeckCraft.app/DeckCraft
+          chmod +x Payload/DeckCraft.app/DeckCraft
+          cat > Payload/DeckCraft.app/Info.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key><string>DeckCraft</string>
+            <key>CFBundleIdentifier</key><string>com.deckcraftios.personal</string>
+            <key>CFBundleName</key><string>DeckCraft</string>
+            <key>CFBundleDisplayName</key><string>DeckCraft</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleVersion</key><string>1</string>
+            <key>CFBundleShortVersionString</key><string>0.1</string>
+            <key>CFBundleSupportedPlatforms</key><array><string>iPhoneOS</string></array>
+            <key>MinimumOSVersion</key><string>16.0</string>
+            <key>UIDeviceFamily</key><array><integer>2</integer></array>
+            <key>UILaunchScreen</key><dict/>
+            <key>UISupportedInterfaceOrientations~ipad</key>
+            <array>
+              <string>UIInterfaceOrientationLandscapeLeft</string>
+              <string>UIInterfaceOrientationLandscapeRight</string>
+              <string>UIInterfaceOrientationPortrait</string>
+              <string>UIInterfaceOrientationPortraitUpsideDown</string>
+            </array>
+          </dict>
+          </plist>
+          EOF
+          zip -r DeckCraft-unsigned.ipa Payload
+
+      - name: Save the IPA so you can download it
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeckCraft-ipa
+          path: DeckCraft-unsigned.ipa
