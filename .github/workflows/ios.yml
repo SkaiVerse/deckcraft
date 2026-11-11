@@ -25,11 +25,13 @@ jobs:
       - name: Speed up repeat builds
         uses: Swatinem/rust-cache@v2
 
-      - name: Show project layout (useful for fixing errors)
+      - name: Remove Linux-only window code (not needed on iPad)
         run: |
-          ls
-          ls apps
-          cat apps/deckcraft/Cargo.toml
+          find . -name Cargo.toml -not -path "./target/*" -print0 | xargs -0 perl -0pi -e 's/"(wayland|x11)"\s*,?\s*//g'
+          echo "--- anything left mentioning wayland or x11 ---"
+          grep -rn --include=Cargo.toml -E "wayland|x11" . || true
+          echo "--- files changed ---"
+          git diff --stat
 
       - name: Build for iPad
         run: cargo build --release --target aarch64-apple-ios -p deckcraft
