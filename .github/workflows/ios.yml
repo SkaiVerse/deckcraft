@@ -30,11 +30,148 @@ jobs:
           find . -name Cargo.toml -not -path "./target/*" -print0 | xargs -0 perl -0pi -e 's/"(wayland|x11)"\s*,?\s*//g'
           echo "--- anything left mentioning wayland or x11 ---"
           grep -rn --include=Cargo.toml -E "wayland|x11" . || true
-          echo "--- files changed ---"
-          git diff --stat
+
+      - name: Show where the app uses file dialogs (for debugging)
+        run: grep -rn --include=*.rs "rfd" . | grep -v "^./target" | head -80 || true
+
+      - name: Create do-nothing stand-in for the file dialog library
+        run: |
+          mkdir -p "$HOME/rfd-stub/src"
+          cat > "$HOME/rfd-stub/Cargo.toml" <<'EOF'
+          [package]
+          name = "rfd"
+          version = "0.17.2"
+          edition = "2021"
+          description = "Stand-in for iPad builds"
+
+          [features]
+          default = []
+          xdg-portal = []
+          gtk3 = []
+          tokio = []
+          async-std = []
+          common-controls-v6 = []
+          file-handle-inner = []
+          EOF
+          cat > "$HOME/rfd-stub/src/lib.rs" <<'EOF'
+          //! Stand-in for the rfd crate on iPad: every dialog does nothing.
+          use std::future::Future;
+          use std::path::{Path, PathBuf};
+
+          #[derive(Default, Clone, Debug)]
+          pub struct FileDialog;
+
+          impl FileDialog {
+              pub fn new() -> Self { Self }
+              pub fn add_filter(self, _name: impl Into<String>, _extensions: &[impl ToString]) -> Self { self }
+              pub fn set_directory<P: AsRef<Path>>(self, _path: P) -> Self { self }
+              pub fn set_file_name(self, _name: impl Into<String>) -> Self { self }
+              pub fn set_title(self, _title: impl Into<String>) -> Self { self }
+              pub fn set_can_create_directories(self, _value: bool) -> Self { self }
+              pub fn set_parent<W: ?Sized>(self, _parent: &W) -> Self { self }
+              pub fn pick_file(self) -> Option<PathBuf> { None }
+              pub fn pick_files(self) -> Option<Vec<PathBuf>> { None }
+              pub fn pick_folder(self) -> Option<PathBuf> { None }
+              pub fn pick_folders(self) -> Option<Vec<PathBuf>> { None }
+              pub fn save_file(self) -> Option<PathBuf> { None }
+          }
+
+          #[derive(Clone, Debug)]
+          pub struct FileHandle(PathBuf);
+
+          impl FileHandle {
+              pub fn path(&self) -> &Path { &self.0 }
+              pub fn file_name(&self) -> String {
+                  self.0.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+              }
+              pub async fn read(&self) -> Vec<u8> { std::fs::read(&self.0).unwrap_or_default() }
+              pub async fn write(&self, data: &[u8]) -> std::io::Result<()> { std::fs::write(&self.0, data) }
+          }
+
+          impl From<PathBuf> for FileHandle {
+              fn from(p: PathBuf) -> Self { FileHandle(p) }
+          }
+
+          impl From<FileHandle> for PathBuf {
+              fn from(h: FileHandle) -> Self { h.0 }
+          }
+
+          #[derive(Default, Clone, Debug)]
+          pub struct AsyncFileDialog;
+
+          impl AsyncFileDialog {
+              pub fn new() -> Self { Self }
+              pub fn add_filter(self, _name: impl Into<String>, _extensions: &[impl ToString]) -> Self { self }
+              pub fn set_directory<P: AsRef<Path>>(self, _path: P) -> Self { self }
+              pub fn set_file_name(self, _name: impl Into<String>) -> Self { self }
+              pub fn set_title(self, _title: impl Into<String>) -> Self { self }
+              pub fn set_can_create_directories(self, _value: bool) -> Self { self }
+              pub fn set_parent<W: ?Sized>(self, _parent: &W) -> Self { self }
+              pub fn pick_file(&self) -> impl Future<Output = Option<FileHandle>> { async { None } }
+              pub fn pick_files(&self) -> impl Future<Output = Option<Vec<FileHandle>>> { async { None } }
+              pub fn pick_folder(&self) -> impl Future<Output = Option<FileHandle>> { async { None } }
+              pub fn pick_folders(&self) -> impl Future<Output = Option<Vec<FileHandle>>> { async { None } }
+              pub fn save_file(&self) -> impl Future<Output = Option<FileHandle>> { async { None } }
+          }
+
+          #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+          pub enum MessageLevel { #[default] Info, Warning, Error }
+
+          #[derive(Clone, Debug, PartialEq, Eq, Default)]
+          pub enum MessageButtons {
+              #[default]
+              Ok,
+              OkCancel,
+              YesNo,
+              YesNoCancel,
+              OkCustom(String),
+              OkCancelCustom(String, String),
+              YesNoCancelCustom(String, String, String),
+          }
+
+          #[derive(Clone, Debug, PartialEq, Eq)]
+          pub enum MessageDialogResult { Yes, No, Ok, Cancel, Custom(String) }
+
+          fn default_answer(buttons: &MessageButtons) -> MessageDialogResult {
+              match buttons {
+                  MessageButtons::Ok | MessageButtons::OkCustom(_) => MessageDialogResult::Ok,
+                  MessageButtons::YesNo => MessageDialogResult::No,
+                  _ => MessageDialogResult::Cancel,
+              }
+          }
+
+          #[derive(Default, Clone, Debug)]
+          pub struct MessageDialog { buttons: MessageButtons }
+
+          impl MessageDialog {
+              pub fn new() -> Self { Self::default() }
+              pub fn set_level(self, _level: MessageLevel) -> Self { self }
+              pub fn set_title(self, _title: impl Into<String>) -> Self { self }
+              pub fn set_description(self, _text: impl Into<String>) -> Self { self }
+              pub fn set_buttons(mut self, buttons: MessageButtons) -> Self { self.buttons = buttons; self }
+              pub fn set_parent<W: ?Sized>(self, _parent: &W) -> Self { self }
+              pub fn show(self) -> MessageDialogResult { default_answer(&self.buttons) }
+          }
+
+          #[derive(Default, Clone, Debug)]
+          pub struct AsyncMessageDialog { buttons: MessageButtons }
+
+          impl AsyncMessageDialog {
+              pub fn new() -> Self { Self::default() }
+              pub fn set_level(self, _level: MessageLevel) -> Self { self }
+              pub fn set_title(self, _title: impl Into<String>) -> Self { self }
+              pub fn set_description(self, _text: impl Into<String>) -> Self { self }
+              pub fn set_buttons(mut self, buttons: MessageButtons) -> Self { self.buttons = buttons; self }
+              pub fn set_parent<W: ?Sized>(self, _parent: &W) -> Self { self }
+              pub fn show(self) -> impl Future<Output = MessageDialogResult> {
+                  let answer = default_answer(&self.buttons);
+                  async move { answer }
+              }
+          }
+          EOF
 
       - name: Build for iPad
-        run: cargo build --release --target aarch64-apple-ios -p deckcraft
+        run: cargo build --release --target aarch64-apple-ios -p deckcraft --config "patch.crates-io.rfd.path='$HOME/rfd-stub'"
 
       - name: List build output
         run: ls -la target/aarch64-apple-ios/release/
