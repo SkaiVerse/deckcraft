@@ -170,6 +170,14 @@ jobs:
           }
           EOF
 
+      - name: Remove Linux-only startup code from main.rs
+        run: |
+          echo "--- code around the problem, before the fix ---"
+          sed -n '260,295p' apps/deckcraft/src/main.rs
+          perl -ni -e 'print unless /EventLoopBuilderExtX11|\.with_x11\(\)/' apps/deckcraft/src/main.rs
+          echo "--- code around the problem, after the fix ---"
+          sed -n '260,295p' apps/deckcraft/src/main.rs
+
       - name: Build for iPad
         run: cargo build --release --target aarch64-apple-ios -p deckcraft --config "patch.crates-io.rfd.path='$HOME/rfd-stub'"
 
